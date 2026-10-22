@@ -1,17 +1,20 @@
-import sqlite3
+import json
+import uuid
 
 import streamlit as st
 
-from database import (
-    init_db,
-    create_workflow,
-    list_workflows,
-    add_task,
-    add_connection,
-    load_workflow,
-    get_history,
-)
+# The backend is the source of truth for workflows, tasks, and connections.
+# The local database is retained only for the existing history feature until
+# the backend provides a history endpoint.
+from database import init_db, get_history
 
+from api_client import (
+    list_workflows as api_list_workflows,
+    create_workflow as api_create_workflow,
+    get_workflow as api_get_workflow,
+    save_workflow_graph as api_save_workflow_graph,
+    convert_workflow_for_ui,
+)
 from workflow_helpers import (
     node_name,
     build_dot,
@@ -39,10 +42,11 @@ st.write(
 
 
 # --------------------------------------------------
-# 2. INITIALIZE THE DATABASE
+# 2. INITIALIZE LOCAL HISTORY STORAGE
 # --------------------------------------------------
 
-# Creates the database and tables if they do not exist.
+# Workflow data is stored by the backend. Initialize the local database only
+# because the current History tab still reads from it.
 init_db()
 
 
@@ -94,6 +98,7 @@ with tab_workflows:
             "Create Workflow"
         )
 
+
     if create_button:
 
         if not workflow_name.strip():
@@ -104,24 +109,31 @@ with tab_workflows:
 
         else:
 
-            new_workflow_id = create_workflow(
-                workflow_name.strip()
-            )
+            try:
+                new_workflow = api_create_workflow(
+                    workflow_name.strip()
+                )
 
-            # Select the newly created workflow.
-            st.session_state.selected_workflow_id = (
-                new_workflow_id
-            )
+                # Select the newly created workflow.
+                st.session_state.selected_workflow_id = (
+                    new_workflow["id"]
+                )
 
-            # Clear any old Check results.
-            st.session_state.last_check = None
+                # Clear any old Check results.
+                st.session_state.last_check = None
 
-            st.success(
-                f"Workflow '{workflow_name.strip()}' created."
-            )
+                st.success(
+                    f"Workflow '{new_workflow['name']}' created."
+                )
 
-            # Reload the app so the new workflow appears.
-            st.rerun()
+                # Reload the app so the new workflow appears.
+                st.rerun()
+
+            except Exception as error:
+                st.error(
+                    f"Could not create workflow: {error}"
+                )
+
 
     st.divider()
 
@@ -129,7 +141,11 @@ with tab_workflows:
     # Load the list of workflows
     # ----------------------------------------------
 
-    workflows = list_workflows()
+    try:
+        workflows = api_list_workflows()
+    except Exception as error:
+        st.error(f"Could not load workflows: {error}")
+        workflows = []
 
     if not workflows:
 
@@ -173,10 +189,14 @@ with tab_workflows:
             selected_workflow_id
         )
 
-        # Load the selected workflow from SQLite.
-        selected_workflow = load_workflow(
-            selected_workflow_id
-        )
+        # Load the selected workflow and graph from the backend.
+        try:
+            backend_workflow = api_get_workflow(selected_workflow_id)
+            selected_workflow = convert_workflow_for_ui(backend_workflow)
+            selected_workflow["created_at"] = backend_workflow.get("created_at", "Not available")
+        except Exception as error:
+            st.error(f"Could not load workflow details: {error}")
+            selected_workflow = None
 
         if selected_workflow:
 
@@ -191,7 +211,7 @@ with tab_workflows:
 
             st.write(
                 f"**Created:** "
-                f"{selected_workflow['created_at']}"
+                f"{selected_workflow.get('created_at', 'Not available')}"
             )
 
             st.write(
@@ -261,40 +281,65 @@ with tab_graph:
             )
 
         if add_task_button:
-
             if not task_name.strip():
-
-                st.error(
-                    "Please enter a task name."
-                )
+                st.error("Please enter a task name.")
 
             else:
+                try:
+                    import uuid
 
-                add_task(
-                    workflow_id=workflow_id,
-                    name=task_name,
-                    task_type=task_type,
-                    settings=task_settings,
-                )
+                    # Retrieve the workflow from the backend.
+                    backend_workflow = api_get_workflow(workflow_id)
 
-                st.session_state.last_check = None
+                    # Preserve existing nodes and connections.
+                    nodes = backend_workflow.get("nodes", []).copy()
+                    edges = backend_workflow.get("edges", []).copy()
 
-                st.success(
-                    f"Task '{task_name.strip()}' saved."
-                )
+                    # Create the new task.
+                    new_node = {
+                        "id": str(uuid.uuid4()),
+                        "name": task_name.strip(),
+                        "kind": task_type,
+                        "config": {"settings_text": task_settings},
+                        "position": {
+                            "x": 0.0,
+                            "y": float(len(nodes) * 120),
+                        },
+                        "sort_order": len(nodes),
+                        "max_retries": 0,
+                        "retry_delay_seconds": 1,
+                        "timeout_seconds": 10,
+                    }
 
-                # Reload from SQLite.
-                st.rerun()
+                    nodes.append(new_node)
+
+                    # Save the complete graph through the backend.
+                    api_save_workflow_graph(
+                        workflow_id=workflow_id,
+                        expected_version=backend_workflow["version"],
+                        nodes=nodes,
+                        edges=edges,
+                    )
+
+                    st.session_state.last_check = None
+                    st.success(f"Task '{task_name.strip()}' saved.")
+                    st.rerun()
+
+                except Exception as error:
+                    st.error(f"Could not save task: {error}")
 
         st.divider()
 
         # ------------------------------------------
-        # Reload the workflow after database changes
+        # Reload the latest workflow from the backend
         # ------------------------------------------
 
-        selected_workflow = load_workflow(
-            workflow_id
-        )
+        try:
+            backend_workflow = api_get_workflow(workflow_id)
+            selected_workflow = convert_workflow_for_ui(backend_workflow)
+        except Exception as error:
+            st.error(f"Could not reload workflow: {error}")
+            st.stop()
 
         tasks = selected_workflow["tasks"]
         connections = selected_workflow["connections"]
@@ -330,10 +375,15 @@ with tab_graph:
                     )
 
                     if task["settings"]:
-
-                        st.write(
-                            f"Settings: {task['settings']}"
-                        )
+                        settings = task["settings"]
+                        if isinstance(settings, dict):
+                            settings_text = settings.get("settings_text")
+                            if settings_text:
+                                st.write(f"Settings: {settings_text}")
+                            else:
+                                st.code(json.dumps(settings, indent=2), language="json")
+                        else:
+                            st.write(f"Settings: {settings}")
 
         st.divider()
 
@@ -419,31 +469,30 @@ with tab_graph:
                 else:
 
                     try:
+                        # Read the full graph so existing node metadata is preserved.
+                        backend_workflow = api_get_workflow(workflow_id)
+                        nodes = backend_workflow.get("nodes", []).copy()
+                        edges = backend_workflow.get("edges", []).copy()
 
-                        add_connection(
+                        # Add the new edge in the backend's expected format.
+                        edges.append({
+                            "source_node_id": source_id,
+                            "target_node_id": target_id,
+                        })
+
+                        api_save_workflow_graph(
                             workflow_id=workflow_id,
-                            source_id=source_id,
-                            target_id=target_id,
+                            expected_version=backend_workflow["version"],
+                            nodes=nodes,
+                            edges=edges,
                         )
 
                         st.session_state.last_check = None
-
-                        st.success(
-                            "Connection saved successfully."
-                        )
-
+                        st.success("Connection saved successfully.")
                         st.rerun()
 
-                    except sqlite3.IntegrityError:
-
-                        st.error(
-                            "The connection could not be "
-                            "saved. It may already exist."
-                        )
-
-                    except ValueError as error:
-
-                        st.error(str(error))
+                    except Exception as error:
+                        st.error(f"Could not save connection: {error}")
 
         st.divider()
 
@@ -453,10 +502,14 @@ with tab_graph:
 
         st.markdown("### Connections")
 
-        # Reload the workflow to get the latest data.
-        selected_workflow = load_workflow(
-            workflow_id
-        )
+        # Reload the workflow to get the latest backend data.
+        try:
+            backend_workflow = api_get_workflow(workflow_id)
+            selected_workflow = convert_workflow_for_ui(backend_workflow)
+
+        except Exception as error:
+            st.error(f"Could not load workflow details: {error}")
+            st.stop()
 
         connections = selected_workflow["connections"]
 
@@ -553,19 +606,18 @@ with tab_check_run:
             key="check_workflow_button",
         ):
 
-            # Load the latest database version.
-            current_workflow = load_workflow(
-                workflow_id
-            )
+            # Check the latest workflow loaded from the backend.
+            try:
+                backend_workflow = api_get_workflow(workflow_id)
+                current_workflow = convert_workflow_for_ui(backend_workflow)
+                errors = check_workflow(current_workflow)
 
-            errors = check_workflow(
-                current_workflow
-            )
-
-            st.session_state.last_check = {
-                "workflow_id": workflow_id,
-                "errors": errors,
-            }
+                st.session_state.last_check = {
+                    "workflow_id": workflow_id,
+                    "errors": errors,
+                }
+            except Exception as error:
+                st.error(f"Could not check workflow: {error}")
 
         # Display the most recent Check result.
         last_check = st.session_state.last_check
