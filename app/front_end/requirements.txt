@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-pydantic
-streamlit
-requests
-alembic
-pytest
-httpx
