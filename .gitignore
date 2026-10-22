@@ -9,10 +9,11 @@ __pycache__/
 # Python cache and compiled files
 *.py[cod]
 
-# Local databases
-*.db
-
 # Test and coverage files
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local databases
+*.db
+*.sqlite3
