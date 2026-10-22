@@ -1,72 +1,97 @@
 # Visual Workflow Runner
 
-## Project Summary
-**Category:** Data, Security & Algorithms  
-**Difficulty:** Intermediate  
-**Suggested team split:** Workflow editor, graph validation, execution engine, history 
+A small web app to build task nodes, connect them as a dependency graph,
+validate the graph, run it in order, and inspect results, retries and failures.
 
-## Description
-This project is a good fit for a small team that wants to build something real and usable in a short amount of time. It focuses on one clear feature, clean data flow, and a simple user experience that can be demoed without extra fluff. The goal is to turn a good idea into a working MVP with a solid backend, a basic interface, and a realistic set of edge cases.
+> **Demo only.** No login, not for sensitive or production data.
 
-## Scope
-Connect task nodes, validate dependencies, and execute workflows in order while tracking failures and retries.
+## What it does (MVP)
+- Create and save workflows made of nodes and connections
+- Validate: missing nodes, duplicate or self connections, cycles
+- Run nodes in a stable dependency order, one at a time
+- Retry failed nodes (0-3 times) and record every attempt
+- Show run history: status, outputs, attempts, errors
 
-## Core Features
-- Deliver the main user flow from start to finish.
-- Support the required data model and user interactions.
-- Handle validation, edge cases, and error states cleanly.
-- Include basic monitoring, feedback, or reporting where relevant.
-- Make the app easy to explain during a live demo.
+## What it does not do
+No user code or shell commands, no outbound network calls from tasks,
+no parallel runs, no scheduling, no login, no cancel or resume.
 
-## Deliverables
-- A working deployed application or API demo
-- A clear README with setup instructions and environment variables
-- A minimal database schema or data model definition
-- UI screens or API endpoints for the core MVP
-- A basic test strategy covering the happy path and one major failure path
-- A short demo script explaining the architecture, choices, and trade-offs
+## Setup
+Requires Python 3.12+.
 
-## Suggested Architecture
-- Frontend: simple dashboard, form-based interface, or lightweight visual layer
-- Backend: API or service layer for business logic and validation
-- Data layer: database, in-memory persistence, or structured file storage for MVP use
-- Optional extras: auth, async jobs, scheduling, WebSockets, caching, or notifications depending on the project
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env             # Windows: copy .env.example .env
+alembic upgrade head
+```
 
-## Learning Outcomes
-Graph algorithms, scheduling, state persistence
+## Run
+```bash
+uvicorn app.main:app --reload
+```
+Open http://127.0.0.1:8000. Health check: http://127.0.0.1:8000/healthz
 
-## Recommended MVP Checklist
-1. Define the main user flow and success criteria.
-2. Build the data model and core backend logic.
-3. Connect the UI or client to the main application flow.
-4. Add key validation, security checks, and realistic error states.
-5. Test the happy path and at least one important edge case.
-6. Deploy the app and document the setup clearly.
+## Demo data
+Start the app with `ENABLE_DEMO_NODE=true` in `.env`, then in a second terminal:
+```bash
+python scripts/seed_demo.py
+```
+It creates three sample workflows (success, retry-then-success, failure).
+Running it again will not create duplicates.
 
-## Free Deployment Options
-Cloudflare Pages, Vercel, or GitHub Pages for demos; Render or Railway for APIs; Supabase or Postgres for persistence.
+## Tests and lint
+```bash
+pytest
+ruff check .
+```
 
-## Good Free Hosting Choices
-- Static frontend: Vercel, Netlify, or GitHub Pages
-- API/backend: Render, Railway, or Fly.io
-- Database/realtime services: Supabase, Neon, Firebase, or Cloudflare D1
-- Documentation/demo pages: GitHub Pages, Cloudflare Pages, or Vercel
+## Environment variables
+| Variable | Purpose | Default |
+|---|---|---|
+| DATABASE_URL | Database connection | sqlite:///./workflow_runner.db |
+| APP_ENV | Environment label | development |
+| ENABLE_DEMO_NODE | Enables the `demo_fail` test node | false |
+| MAX_CONCURRENT_RUNS | Runs executing at once | 1 |
+| LOG_LEVEL | Log detail | INFO |
+| PORT | Port when the host sets one | 8000 |
 
-## Typical Tech Stack
-- Frontend: React, Next.js, plain HTML/JS, or similar lightweight UI tooling
-- Backend: Node.js, Python (Flask/FastAPI), or Java/Spring Boot
-- Database: Postgres, SQLite, Supabase, or a simple file-based store
-- Real-time layer: WebSockets, polling, or background workers if needed
+## Node types
+- `emit_json`: returns the JSON value in its config
+- `combine_inputs`: returns the outputs of its direct parents
+- `delay`: waits 0-5 seconds, then returns its inputs
+- `demo_fail`: fails the first N attempts, then succeeds (demo only)
 
-## Final Demo Expectations
-- Provide a working URL with sample or seeded data
-- Show one clear end-to-end flow from start to finish
-- Explain the most important technical decisions and trade-offs
-- Include screenshots, screen recordings, or a brief live walk-through
-- Highlight what was completed in the MVP and what would be next if the project continued
+## Main API endpoints
+| Method and path | Purpose |
+|---|---|
+| GET /healthz | Health check |
+| POST /api/v1/workflows | Create a workflow |
+| GET /api/v1/workflows | List workflows |
+| GET /api/v1/workflows/{id} | Read a workflow, nodes and edges |
+| PUT /api/v1/workflows/{id}/graph | Save the whole graph |
+| POST /api/v1/workflows/{id}/validate | Validate the saved graph |
+| POST /api/v1/workflows/{id}/runs | Start a run |
+| GET /api/v1/workflows/{id}/runs | List recent runs |
+| GET /api/v1/runs/{run_id} | Run detail with tasks and attempts |
 
-## Next Improvements
-- Add authorization, auditing, or stronger validation
-- Improve test coverage and resilience
-- Add analytics, metrics, or observability
-- Expand functionality once the core MVP is stable
+## Architecture
+- `app/graph/`: pure validation and ordering logic
+- `app/engine/`: task handlers, runner, retries
+- `app/api/`, `app/db/`, `app/services/`: HTTP, database, business logic
+- `app/web/`: pages, templates, static files
+
+## Known limitations
+No authentication, single-instance in-process worker, sequential execution,
+no arbitrary code or network tasks, no cancel or resume. A run interrupted by a
+restart is marked failed.
+
+## Troubleshooting
+- **Port in use:** run `uvicorn app.main:app --port 8001`
+- **No such table:** run `alembic upgrade head`
+- **database is locked:** keep `MAX_CONCURRENT_RUNS=1` with SQLite
+- **demo_fail rejected:** set `ENABLE_DEMO_NODE=true` and restart
+
+## Demo
+See `docs/demo_script.md`.
