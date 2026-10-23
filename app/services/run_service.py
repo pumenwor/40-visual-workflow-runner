@@ -5,6 +5,7 @@ from app.api.schemas import AttemptOut, RunDetail, TaskRunOut
 from app.db.models import TaskRun, WorkflowRun
 from app.errors import ConflictError, NotFoundError
 from app.services import workflow_service
+from app.services.worker import submit_run
 
 
 def create_run(db: Session, workflow_id: str) -> WorkflowRun:
@@ -49,6 +50,7 @@ def create_run(db: Session, workflow_id: str) -> WorkflowRun:
 
     db.commit()
     db.refresh(run)
+    submit_run(run.id)
     return run
 
 

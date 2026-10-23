@@ -2,8 +2,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas import (
-    EdgeOut, GraphSaveRequest, NodeOut, Position, ValidationResponse,
-    WorkflowDetail, WorkflowSummary,
+    EdgeOut, GraphSaveRequest, NodeOut, Position, ValidationIssue,
+    ValidationResponse, WorkflowDetail, WorkflowSummary,
 )
 from app.db.models import Edge, Node, Workflow
 from app.errors import ConflictError, InvalidGraphError, NotFoundError
@@ -157,13 +157,44 @@ def save_graph(db: Session, workflow_id: str, request: GraphSaveRequest) -> Work
     db.refresh(workflow)
     return workflow
 
-def _stub_validate(workflow: Workflow) -> ValidationResponse:
-    """TEMPORARY stand-in. Replace with Person 3's validate_graph when it exists.
-    This always says the graph is valid. It does NOT detect cycles."""
-    ordered = sorted(workflow.nodes, key=lambda n: n.sort_order)
-    return ValidationResponse(valid=True, execution_order=[n.id for n in ordered])
-
-
 def validate_workflow(db: Session, workflow_id: str) -> ValidationResponse:
+    import os
+
+    from app.graph.types import EdgeDef, GraphDef, NodeDef
+    from app.graph.validation import validate_graph
+
     workflow = get_workflow(db, workflow_id)
-    return _stub_validate(workflow)
+    graph = GraphDef(
+        nodes=[
+            NodeDef(
+                id=n.id,
+                name=n.name,
+                kind=n.kind,
+                config=n.config_json,
+                sort_order=n.sort_order,
+                max_retries=n.max_retries,
+                retry_delay_seconds=n.retry_delay_seconds,
+                timeout_seconds=n.timeout_seconds,
+            )
+            for n in workflow.nodes
+        ],
+        edges=[
+            EdgeDef(source_node_id=e.source_node_id, target_node_id=e.target_node_id)
+            for e in workflow.edges
+        ],
+    )
+    allow_demo = os.environ.get("ENABLE_DEMO_NODE", "false").lower() == "true"
+    result = validate_graph(graph, allow_demo_node=allow_demo)
+
+    def to_issue(i):
+        edge_ids = [f"{i.edge[0]}->{i.edge[1]}"] if i.edge else []
+        return ValidationIssue(
+            code=i.code, message=i.message, node_ids=list(i.node_ids), edge_ids=edge_ids
+        )
+
+    return ValidationResponse(
+        valid=result.valid,
+        errors=[to_issue(i) for i in result.errors],
+        warnings=[to_issue(i) for i in result.warnings],
+        execution_order=list(result.execution_order),
+    )

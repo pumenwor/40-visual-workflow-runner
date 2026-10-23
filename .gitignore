@@ -1,13 +1,16 @@
-node_modules
-.env
-__pycache__
-.DS_Store
-
-# Python
-.venv/
+__pycache__/
 *.pyc
-.pytest_cache/
-
-# Local databases
-*.db
-*.sqlite3
+*.pyo
+.venv/
+venv/
+*.zip
+*.tar.gz
+*.tar
+demo_fixed.db
+workflow_runner.db
+.env
+.env.zip
+app.zip
+tests.zip
+migrations.zip
+README_draft.md
