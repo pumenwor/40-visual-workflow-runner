@@ -1,3 +1,6 @@
+from app.services import run_service
+
+
 def make_node(node_id, name, sort_order=0):
     return {
         "id": node_id, "name": name, "kind": "emit_json",
@@ -30,13 +33,19 @@ def test_create_run_returns_202_and_queued(client):
     assert body["workflow_version"] == 2
 
 
-def test_get_run_shows_pending_tasks_in_order(client):
+def test_get_run_shows_pending_tasks_in_order(client, monkeypatch):
+    # This test is about the state persisted at run creation, before the
+    # worker starts. Replace scheduling with a no-op so the assertion is
+    # deterministic instead of racing the real in-process worker.
+    monkeypatch.setattr(run_service, "submit_run", lambda run_id: None)
+
     wf = make_saved_workflow(client)
     run = client.post(f"/api/v1/workflows/{wf['id']}/runs").json()
     detail = client.get(f"/api/v1/runs/{run['id']}").json()
+    assert detail["status"] == "queued", detail
     assert [t["node_name"] for t in detail["tasks"]] == ["A", "B"]
-    assert all(t["status"] == "pending" for t in detail["tasks"])
-    assert all(t["attempts"] == [] for t in detail["tasks"])
+    assert all(t["status"] == "pending" for t in detail["tasks"]), detail
+    assert all(t["attempts"] == [] for t in detail["tasks"]), detail
 
 
 def test_empty_workflow_cannot_run(client):

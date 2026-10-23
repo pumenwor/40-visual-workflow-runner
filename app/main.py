@@ -1,14 +1,19 @@
 import logging
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes_runs import router as runs_router
 from app.api.routes_workflows import router as workflows_router
 from app.config import LOG_LEVEL
+from app.db.repositories import SqlRunRepository
 from app.errors import AppError
+from app.web.routes import router as web_router
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -16,9 +21,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
-app = FastAPI(title="Visual Workflow Runner")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Mark runs left in ``running`` by a previous process as interrupted."""
+    try:
+        recovered = SqlRunRepository().recover_interrupted_runs()
+        if recovered:
+            logger.warning("Marked %s interrupted run(s) as failed", len(recovered))
+    except Exception:
+        # A not-yet-migrated database should not prevent the process from
+        # starting far enough to report the real error on API use.
+        logger.exception("Could not recover interrupted runs at startup")
+    yield
+
+
+app = FastAPI(title="Visual Workflow Runner", lifespan=lifespan)
 app.include_router(workflows_router)
 app.include_router(runs_router)
+app.include_router(web_router)
+app.mount(
+    "/static",
+    StaticFiles(directory=Path(__file__).parent / "web" / "static"),
+    name="static",
+)
 
 
 def error_response(status_code: int, code: str, message: str, details: list | None = None):

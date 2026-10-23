@@ -4,4 +4,5 @@ sqlalchemy
 alembic
 pydantic
 pytest
-httpx
+httpxpsycopg2-binary
+python-dotenv

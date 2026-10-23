@@ -2,7 +2,8 @@ def test_validate_existing_workflow(client):
     wf = client.post("/api/v1/workflows", json={"name": "Demo"}).json()
     node = {
         "id": "a", "name": "A", "kind": "emit_json",
-        "config": {}, "position": {"x": 0, "y": 0},
+        # PRD 5.3: emit_json requires a "value" in its config.
+        "config": {"value": {"value": 3}}, "position": {"x": 0, "y": 0},
     }
     client.put(
         f"/api/v1/workflows/{wf['id']}/graph",
@@ -11,7 +12,7 @@ def test_validate_existing_workflow(client):
     response = client.post(f"/api/v1/workflows/{wf['id']}/validate")
     assert response.status_code == 200
     body = response.json()
-    assert body["valid"] is True
+    assert body["valid"] is True, body
     assert body["execution_order"] == ["a"]
 
 

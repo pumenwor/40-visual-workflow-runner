@@ -48,5 +48,5 @@ def wait_for_run(client, run_id, timeout=8):
 
 
 def tasks_by_name(run):
-    # Adjust "tasks" / "node_name_snapshot" if your API names differ
-    return {t["node_name_snapshot"]: t for t in run["tasks"]}
+    # Adjust "tasks" / "node_name" if your API names differ
+    return {t["node_name"]: t for t in run["tasks"]}

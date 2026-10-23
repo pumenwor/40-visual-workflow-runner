@@ -62,10 +62,12 @@ def test_cycle_rejected(client):
 
 def test_self_edge_and_missing_endpoint_rejected(client):
     wf = create_workflow(client)
-    save_graph(client, wf["id"], [node("a", "A", "emit_json", {"value": 1})],
-               [edge("a", "a"), edge("a", "ghost")])
-    r = client.post(f"{API}/workflows/{wf['id']}/validate").json()
-    assert r["valid"] is False
+    r = save_graph(client, wf["id"], [node("a", "A", "emit_json", {"value": 1})],
+                   [edge("a", "a")])
+    assert r.status_code == 422
+    r = save_graph(client, wf["id"], [node("a", "A", "emit_json", {"value": 1})],
+                   [edge("a", "ghost")])
+    assert r.status_code == 422
 
 
 def test_successful_run_passes_parent_outputs(client):
@@ -76,7 +78,7 @@ def test_successful_run_passes_parent_outputs(client):
     assert run["status"] == "succeeded"
     t = tasks_by_name(run)
     assert t["Combine"]["status"] == "succeeded"
-    assert t["Combine"]["output_json"] == {"inputs": {"a": 1, "b": 2}}
+    assert t["Combine"]["output"] == {"inputs": {"a": 1, "b": 2}}
 
 
 def test_retry_then_success(client):

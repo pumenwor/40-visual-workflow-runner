@@ -13,3 +13,13 @@ __pycache__/
 # Local databases
 *.db
 *.sqlite3
+*.zip
+*.tar.gz
+*.tar
+demo_fixed.db
+workflow_runner.db
+.env
+.env.zip
+README_draft.md
+app.zip
+tests.zip

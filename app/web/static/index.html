@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Visual Workflow Runner</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Visual DAG editor · validation · execution · history</p>
+      <h1>Visual Workflow Runner</h1>
+      <p class="subtitle">Connect task boxes. An arrow means “this must finish first.”</p>
+    </div>
+    <nav aria-label="Application links">
+      <a href="/docs" target="_blank" rel="noreferrer">API docs</a>
+      <a href="/healthz" target="_blank" rel="noreferrer">Health check</a>
+    </nav>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar" aria-label="Workflows">
+      <section class="panel">
+        <h2>Create workflow</h2>
+        <label for="new-workflow-name">Workflow name</label>
+        <input id="new-workflow-name" type="text" maxlength="80" placeholder="e.g. Prepare a report">
+        <label for="new-workflow-description">Description <span class="muted">(optional)</span></label>
+        <textarea id="new-workflow-description" rows="3" placeholder="What does this process do?"></textarea>
+        <button id="create-workflow" class="primary" type="button">Create workflow</button>
+        <button id="load-samples" type="button">Load sample workflows</button>
+        <p class="hint">Samples show success, retry recovery, and terminal failure. Retry samples need <code>ENABLE_DEMO_NODE=true</code>.</p>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading">
+          <h2>Workflows</h2>
+          <button id="refresh-workflows" class="small" type="button">Refresh</button>
+        </div>
+        <div id="workflow-list" class="workflow-list">
+          <p class="muted">Loading workflows…</p>
+        </div>
+      </section>
+    </aside>
+
+    <main>
+      <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+      <section id="empty-state" class="panel empty-state">
+        <h2>Select or create a workflow</h2>
+        <p>Create a workflow, add built-in task nodes, connect their dependencies, save, validate, and run. Completed runs stay in history even after a refresh.</p>
+      </section>
+
+      <div id="editor" hidden>
+        <section class="panel workflow-header">
+          <div>
+            <p class="eyebrow">Workflow editor</p>
+            <h2 id="workflow-title">Workflow</h2>
+            <p id="workflow-meta" class="muted"></p>
+            <p id="dirty-indicator" class="dirty" hidden>● Unsaved changes — Save before Validate or Run.</p>
+          </div>
+          <div class="actions">
+            <button id="save-graph" class="primary" type="button">Save graph</button>
+            <button id="validate-graph" type="button">Validate</button>
+            <button id="run-workflow" class="success" type="button">Run workflow</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading wrap">
+            <div>
+              <h2>Graph canvas</h2>
+              <p class="muted">Drag cards to arrange them. Click a card to edit it below. Arrows point from prerequisite to dependent task.</p>
+            </div>
+            <div class="inline-controls">
+              <label for="new-node-kind">New node type</label>
+              <select id="new-node-kind">
+                <option value="emit_json">Create value (emit_json)</option>
+                <option value="combine_inputs">Combine inputs</option>
+                <option value="delay">Delay</option>
+                <option value="demo_fail">Demo failure</option>
+              </select>
+              <button id="add-node" type="button">Add node</button>
+            </div>
+          </div>
+
+          <div id="canvas" class="canvas" aria-label="Workflow graph canvas">
+            <svg id="edge-layer" aria-hidden="true"></svg>
+            <div id="node-layer"></div>
+            <p id="canvas-empty" class="canvas-empty">No nodes yet. Add your first node.</p>
+          </div>
+        </section>
+
+        <div class="two-columns">
+          <section class="panel" aria-labelledby="node-editor-heading">
+            <div class="section-heading">
+              <h2 id="node-editor-heading">Node settings</h2>
+              <button id="delete-node" class="danger small" type="button">Delete node</button>
+            </div>
+            <div id="node-editor-empty" class="muted">Select a node card to edit it.</div>
+            <form id="node-editor" hidden>
+              <label for="node-name">Name</label>
+              <input id="node-name" type="text" maxlength="80" required>
+
+              <label for="node-kind">Type</label>
+              <select id="node-kind">
+                <option value="emit_json">Create value (emit_json)</option>
+                <option value="combine_inputs">Combine inputs</option>
+                <option value="delay">Delay</option>
+                <option value="demo_fail">Demo failure</option>
+              </select>
+
+              <label for="node-config">Configuration JSON</label>
+              <textarea id="node-config" rows="7" spellcheck="false"></textarea>
+              <p class="hint">Examples: <code>{"value": {"value": 3}}</code>, <code>{"seconds": 1}</code>, <code>{"fail_first_n_attempts": 1, "value": "ok"}</code>.</p>
+
+              <div class="form-grid">
+                <div>
+                  <label for="node-sort-order">Sort order</label>
+                  <input id="node-sort-order" type="number" step="1">
+                </div>
+                <div>
+                  <label for="node-retries">Max retries (0–3)</label>
+                  <input id="node-retries" type="number" min="0" max="3" step="1">
+                </div>
+                <div>
+                  <label for="node-retry-delay">Retry delay sec. (0–10)</label>
+                  <input id="node-retry-delay" type="number" min="0" max="10" step="1">
+                </div>
+                <div>
+                  <label for="node-timeout">Timeout sec. (1–30)</label>
+                  <input id="node-timeout" type="number" min="1" max="30" step="1">
+                </div>
+                <div>
+                  <label for="node-x">Position X</label>
+                  <input id="node-x" type="number" step="1">
+                </div>
+                <div>
+                  <label for="node-y">Position Y</label>
+                  <input id="node-y" type="number" step="1">
+                </div>
+              </div>
+              <p class="hint">Node ID: <code id="node-id"></code></p>
+            </form>
+          </section>
+
+          <section class="panel" aria-labelledby="connections-heading">
+            <h2 id="connections-heading">Connections</h2>
+            <label for="edge-source">Must finish first</label>
+            <select id="edge-source"></select>
+            <label for="edge-target">Then this can run</label>
+            <select id="edge-target"></select>
+            <button id="add-edge" type="button">Add connection</button>
+            <div id="edge-list" class="edge-list"></div>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="validation-heading">
+          <h2 id="validation-heading">Validation</h2>
+          <div id="validation-results" class="muted">Save the graph, then click Validate to check node configuration, endpoints, duplicates, self-connections, limits, and cycles.</div>
+        </section>
+
+        <section class="panel" aria-labelledby="history-heading">
+          <div class="section-heading">
+            <div>
+              <h2 id="history-heading">Run history</h2>
+              <p class="muted">Newest first. Active runs refresh automatically every second.</p>
+            </div>
+            <button id="refresh-runs" class="small" type="button">Refresh history</button>
+          </div>
+          <div class="history-layout">
+            <div id="runs-list" class="runs-list">
+              <p class="muted">No runs loaded.</p>
+            </div>
+            <div id="run-detail" class="run-detail">
+              <p class="muted">Select a run to inspect task outputs, errors, and every attempt.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
